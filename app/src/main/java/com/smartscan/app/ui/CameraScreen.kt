@@ -78,6 +78,7 @@ private const val STEADY_FRAMES = 8
 @Composable
 fun CameraScreen(
     initialDocId: String?,
+    folderId: String? = null,
     onFinished: (docId: String, cropPageId: String?) -> Unit,
     onCancel: () -> Unit,
 ) {
@@ -231,7 +232,7 @@ fun CameraScreen(
     LaunchedEffect(torch, camera) { camera?.cameraControl?.enableTorch(torch) }
 
     suspend fun ensureDoc(): String = docLock.withLock {
-        docId ?: DocumentRepository.create().id.also { docId = it }
+        docId ?: DocumentRepository.create(folderId).id.also { docId = it }
     }
 
     fun processImage(uri: Uri, temp: File?, allowSingleNavigate: Boolean) {

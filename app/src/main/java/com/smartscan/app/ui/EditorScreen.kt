@@ -68,6 +68,8 @@ fun EditorScreen(
     var confirmDeleteDoc by remember { mutableStateOf(false) }
     var ocrText by remember { mutableStateOf<String?>(null) }
     var menuOpen by remember { mutableStateOf(false) }
+    var showMove by remember { mutableStateOf(false) }
+    val folders by DocumentRepository.folders.collectAsStateWithLifecycle()
 
     // Runs in the app scope so a render is never left half-done if the user navigates away.
     fun runWork(block: suspend () -> Unit) {
@@ -88,10 +90,16 @@ fun EditorScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Text(
-                        doc.name, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.clickable { showRename = true },
-                    )
+                    Column(Modifier.clickable { showRename = true }) {
+                        Text(doc.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            folderPathLabel(folders, doc.folderId),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
@@ -110,6 +118,10 @@ fun EditorScreen(
                             DropdownMenuItem(
                                 text = { Text("Rename document") },
                                 onClick = { menuOpen = false; showRename = true },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Move to folder") },
+                                onClick = { menuOpen = false; showMove = true },
                             )
                             DropdownMenuItem(
                                 text = { Text("Move page left") },
@@ -251,6 +263,17 @@ fun EditorScreen(
     }
 
     if (showExport) ExportSheet(doc) { showExport = false }
+
+    if (showMove) {
+        MoveToFolderDialog(
+            currentFolderId = doc.folderId,
+            count = 1,
+            onDismiss = { showMove = false },
+        ) { target ->
+            showMove = false
+            scope.launch { DocumentRepository.moveDocuments(listOf(docId), target) }
+        }
+    }
 
     if (showRename) {
         RenameDialog(doc.name, onDismiss = { showRename = false }) { name ->

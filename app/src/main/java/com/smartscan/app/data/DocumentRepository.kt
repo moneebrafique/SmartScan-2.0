@@ -16,21 +16,43 @@ import java.util.Date
 import java.util.Locale
 import java.util.UUID
 
-/** Stores each document as a folder: docs/<id>/doc.json + page images. */
+/**
+ * Documents: docs/<id>/doc.json + page images.
+ * Folders: folders.json (a flat list with parent links, so folders can be nested).
+ */
 object DocumentRepository {
     private lateinit var root: File
+    private lateinit var foldersFile: File
     private val mutex = Mutex()
+
     private val _documents = MutableStateFlow<List<ScanDocument>>(emptyList())
     val documents: StateFlow<List<ScanDocument>> = _documents.asStateFlow()
 
+    private val _folders = MutableStateFlow<List<Folder>>(emptyList())
+    val folders: StateFlow<List<Folder>> = _folders.asStateFlow()
+
     fun init(context: Context) {
         root = File(context.filesDir, "docs").apply { mkdirs() }
+        foldersFile = File(context.filesDir, "folders.json")
         _documents.value = root.listFiles()
             ?.mapNotNull { dir ->
                 runCatching { fromJson(JSONObject(File(dir, "doc.json").readText())) }.getOrNull()
             }
             ?.sortedByDescending { it.updatedAt }
             ?: emptyList()
+        _folders.value = runCatching {
+            val arr = JSONArray(foldersFile.readText())
+            (0 until arr.length()).map { i ->
+                val o = arr.getJSONObject(i)
+                Folder(
+                    id = o.getString("id"),
+                    name = o.getString("name"),
+                    parentId = if (o.isNull("parentId")) null else o.getString("parentId"),
+                    color = o.optInt("color", 0),
+                    createdAt = o.optLong("createdAt", 0L),
+                )
+            }
+        }.getOrDefault(emptyList())
     }
 
     fun get(id: String): ScanDocument? = _documents.value.firstOrNull { it.id == id }
@@ -39,26 +61,32 @@ object DocumentRepository {
 
     fun file(docId: String, name: String): File = File(docDir(docId), name)
 
-    suspend fun create(): ScanDocument = withContext(Dispatchers.IO) {
+    // ------------------------------------------------------------------ documents
+
+    suspend fun create(folderId: String? = null): ScanDocument = withContext(Dispatchers.IO) {
         mutex.withLock {
             val now = System.currentTimeMillis()
             val name = "Scan " + SimpleDateFormat("yyyy-MM-dd HH.mm", Locale.US).format(Date(now))
-            val doc = ScanDocument(UUID.randomUUID().toString(), name, now, now, emptyList())
+            val doc = ScanDocument(UUID.randomUUID().toString(), name, now, now, emptyList(), folderId)
             write(doc)
             doc
         }
     }
 
-    /** Atomic read-modify-write of a document. */
-    suspend fun update(docId: String, transform: (ScanDocument) -> ScanDocument): ScanDocument? =
-        withContext(Dispatchers.IO) {
-            mutex.withLock {
-                val current = get(docId) ?: return@withLock null
-                val updated = transform(current).copy(updatedAt = System.currentTimeMillis())
-                write(updated)
-                updated
-            }
+    /** Atomic read-modify-write of a document. [touch] updates the "modified" time. */
+    suspend fun update(
+        docId: String,
+        touch: Boolean = true,
+        transform: (ScanDocument) -> ScanDocument,
+    ): ScanDocument? = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            val current = get(docId) ?: return@withLock null
+            var updated = transform(current)
+            if (touch) updated = updated.copy(updatedAt = System.currentTimeMillis())
+            write(updated)
+            updated
         }
+    }
 
     suspend fun delete(docId: String) {
         withContext(Dispatchers.IO) {
@@ -67,6 +95,95 @@ object DocumentRepository {
                 _documents.value = _documents.value.filterNot { it.id == docId }
             }
         }
+    }
+
+    suspend fun moveDocuments(docIds: Collection<String>, folderId: String?) {
+        withContext(Dispatchers.IO) {
+            mutex.withLock {
+                for (id in docIds) {
+                    val doc = get(id) ?: continue
+                    if (doc.folderId != folderId) write(doc.copy(folderId = folderId))
+                }
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ folders
+
+    suspend fun createFolder(name: String, parentId: String?, color: Int): Folder =
+        withContext(Dispatchers.IO) {
+            mutex.withLock {
+                val folder = Folder(UUID.randomUUID().toString(), name, parentId, color, System.currentTimeMillis())
+                writeFolders(_folders.value + folder)
+                folder
+            }
+        }
+
+    suspend fun updateFolder(id: String, transform: (Folder) -> Folder) {
+        withContext(Dispatchers.IO) {
+            mutex.withLock {
+                writeFolders(_folders.value.map { if (it.id == id) transform(it) else it })
+            }
+        }
+    }
+
+    /** The folder itself plus all folders nested inside it. */
+    fun descendantFolderIds(id: String): Set<String> {
+        val all = _folders.value
+        val result = mutableSetOf(id)
+        var frontier = setOf(id)
+        while (frontier.isNotEmpty()) {
+            frontier = all.filter { it.parentId in frontier && it.id !in result }.map { it.id }.toSet()
+            result += frontier
+        }
+        return result
+    }
+
+    /**
+     * Deletes a folder. If [deleteContents] is false, its documents and sub-folders move up
+     * to the parent folder; otherwise everything inside is deleted too.
+     */
+    suspend fun deleteFolder(id: String, deleteContents: Boolean) {
+        withContext(Dispatchers.IO) {
+            mutex.withLock {
+                val folder = _folders.value.firstOrNull { it.id == id } ?: return@withLock
+                if (deleteContents) {
+                    val ids = descendantFolderIds(id)
+                    val doomed = _documents.value.filter { it.folderId in ids }
+                    doomed.forEach { docDir(it.id).deleteRecursively() }
+                    val doomedIds = doomed.map { it.id }.toSet()
+                    _documents.value = _documents.value.filterNot { it.id in doomedIds }
+                    writeFolders(_folders.value.filterNot { it.id in ids })
+                } else {
+                    _documents.value.filter { it.folderId == id }
+                        .forEach { write(it.copy(folderId = folder.parentId)) }
+                    writeFolders(
+                        _folders.value
+                            .filterNot { it.id == id }
+                            .map { if (it.parentId == id) it.copy(parentId = folder.parentId) else it },
+                    )
+                }
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ persistence
+
+    private fun writeFolders(list: List<Folder>) {
+        val arr = JSONArray()
+        list.forEach { f ->
+            arr.put(JSONObject().apply {
+                put("id", f.id)
+                put("name", f.name)
+                put("parentId", f.parentId ?: JSONObject.NULL)
+                put("color", f.color)
+                put("createdAt", f.createdAt)
+            })
+        }
+        val tmp = File(foldersFile.parentFile, "folders.json.tmp")
+        tmp.writeText(arr.toString())
+        tmp.renameTo(foldersFile)
+        _folders.value = list
     }
 
     private fun write(doc: ScanDocument) {
@@ -83,6 +200,7 @@ object DocumentRepository {
         put("name", d.name)
         put("createdAt", d.createdAt)
         put("updatedAt", d.updatedAt)
+        put("folderId", d.folderId ?: JSONObject.NULL)
         put("pages", JSONArray().apply {
             d.pages.forEach { p ->
                 put(JSONObject().apply {
@@ -134,8 +252,12 @@ object DocumentRepository {
             )
         }
         return ScanDocument(
-            o.getString("id"), o.getString("name"),
-            o.getLong("createdAt"), o.getLong("updatedAt"), pages,
+            id = o.getString("id"),
+            name = o.getString("name"),
+            createdAt = o.getLong("createdAt"),
+            updatedAt = o.getLong("updatedAt"),
+            pages = pages,
+            folderId = if (o.isNull("folderId")) null else o.getString("folderId"),
         )
     }
 }

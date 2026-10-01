@@ -37,6 +37,15 @@ data class ScanDocument(
     val createdAt: Long,
     val updatedAt: Long,
     val pages: List<ScanPage>,
+    val folderId: String? = null, // null = top level (Home)
+)
+
+data class Folder(
+    val id: String,
+    val name: String,
+    val parentId: String?, // null = top level
+    val color: Int,        // index into the folder colour palette
+    val createdAt: Long,
 )
 
 val FULL_CORNERS = listOf(Pt(0f, 0f), Pt(1f, 0f), Pt(1f, 1f), Pt(0f, 1f))

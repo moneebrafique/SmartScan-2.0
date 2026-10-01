@@ -5,9 +5,11 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.Composable
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import com.smartscan.app.ui.AdjustScreen
 import com.smartscan.app.ui.CameraScreen
 import com.smartscan.app.ui.CropScreen
@@ -30,13 +32,22 @@ private fun AppNavigation() {
         composable("home") {
             HomeScreen(
                 onOpen = { nav.navigate("editor/$it") },
-                onScan = { nav.navigate("camera/new") },
+                onScan = { folderId ->
+                    nav.navigate(if (folderId == null) "camera/new" else "camera/new?folder=$folderId")
+                },
             )
         }
-        composable("camera/{docId}") { entry ->
+        composable(
+            route = "camera/{docId}?folder={folder}",
+            arguments = listOf(
+                navArgument("docId") { type = NavType.StringType },
+                navArgument("folder") { type = NavType.StringType; nullable = true; defaultValue = null },
+            ),
+        ) { entry ->
             val arg = entry.arguments?.getString("docId")
             CameraScreen(
                 initialDocId = arg?.takeIf { it != "new" },
+                folderId = entry.arguments?.getString("folder"),
                 onFinished = { docId, cropPageId ->
                     nav.navigate("editor/$docId") { popUpTo("home") }
                     if (cropPageId != null) nav.navigate("crop/$docId/$cropPageId")
