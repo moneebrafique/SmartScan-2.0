@@ -194,7 +194,7 @@ fun HomeScreen(onOpen: (String) -> Unit, onScan: (folderId: String?) -> Unit) {
                 TopAppBar(
                     title = {
                         Text(
-                            current?.name ?: "SmartScan",
+                            current?.name ?: "SmartScan Pro",
                             fontWeight = FontWeight.Bold,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
