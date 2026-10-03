@@ -39,3 +39,14 @@ Without your own key, each build is signed with a different temporary key, so a 
 - minSdk 29 (Android 10+), arm64 only (keeps APK size down).
 - Images are processed at up to 3000 px on the long side.
 - Documents live in the app's private storage (`files/docs/<id>/`).
+
+## Automatic updates (in-app)
+Every push builds a new version (1.0.<build number>) and publishes it as a GitHub Release
+(only when your signing-key secrets are set). The app checks for a newer release when it opens
+(at most every 6 hours) or via ⋮ → Check for updates, downloads it and opens the installer.
+The commit message is shown as "What's new".
+
+Requirements:
+- The repo must be **public** (phones download the APK from the Release without logging in).
+- Keep the 4 signing secrets set, and don't rename `.github/workflows/build.yml`
+  (its run number is the version number).

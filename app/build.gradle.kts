@@ -12,8 +12,11 @@ android {
         applicationId = "com.smartscan.app"
         minSdk = 29
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        // Set automatically by GitHub Actions (build number) so every build is a newer version.
+        versionCode = System.getenv("VERSION_CODE")?.toIntOrNull() ?: 1
+        versionName = System.getenv("VERSION_NAME") ?: "1.0"
+        // "owner/repo" whose GitHub Releases the app checks for updates.
+        buildConfigField("String", "UPDATE_REPO", "\"${System.getenv("UPDATE_REPO") ?: ""}\"")
         // Pixel and all modern phones are arm64; keeps the APK small (OpenCV is large).
         ndk { abiFilters += listOf("arm64-v8a") }
     }
@@ -43,7 +46,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
-    buildFeatures { compose = true }
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
     lint {
         checkReleaseBuilds = false
         abortOnError = false

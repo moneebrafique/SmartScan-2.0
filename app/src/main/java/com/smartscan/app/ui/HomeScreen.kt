@@ -33,6 +33,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
+import com.smartscan.app.BuildConfig
 import com.smartscan.app.data.DocumentRepository
 import com.smartscan.app.data.Folder
 import com.smartscan.app.data.ScanDocument
@@ -41,6 +42,8 @@ import com.smartscan.app.export.ExportQuality
 import com.smartscan.app.export.Exporter
 import com.smartscan.app.export.PdfPageSize
 import com.smartscan.app.processing.ScanActions
+import com.smartscan.app.update.UpdateInfo
+import com.smartscan.app.update.Updater
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -83,6 +86,35 @@ fun HomeScreen(onOpen: (String) -> Unit, onScan: (folderId: String?) -> Unit) {
     var moveIds by remember { mutableStateOf<List<String>?>(null) }
     var shareIds by remember { mutableStateOf<List<String>?>(null) }
     var sortMenu by remember { mutableStateOf(false) }
+    var moreMenu by remember { mutableStateOf(false) }
+    var update by remember { mutableStateOf<UpdateInfo?>(null) }
+    var checkingUpdate by remember { mutableStateOf(false) }
+
+    // Quietly check for a new version when the app opens (at most every 6 hours).
+    LaunchedEffect(Unit) {
+        if (Updater.shouldAutoCheck(context)) {
+            runCatching { Updater.check() }.onSuccess {
+                Updater.markChecked(context)
+                if (it != null) update = it
+            }
+        }
+    }
+
+    fun checkForUpdates() {
+        if (checkingUpdate) return
+        checkingUpdate = true
+        scope.launch {
+            val result = runCatching { Updater.check() }
+            checkingUpdate = false
+            result.onSuccess {
+                Updater.markChecked(context)
+                if (it != null) update = it
+                else Toast.makeText(context, "You have the latest version (${BuildConfig.VERSION_NAME})", Toast.LENGTH_SHORT).show()
+            }.onFailure {
+                Toast.makeText(context, "Couldn't check for updates: ${it.message}", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
 
     BackHandler(enabled = selecting || current != null) {
         if (selecting) selected.clear() else currentId = current?.parentId
@@ -191,6 +223,25 @@ fun HomeScreen(onOpen: (String) -> Unit, onScan: (folderId: String?) -> Unit) {
                                         onClick = { sort = m; sortMenu = false },
                                     )
                                 }
+                            }
+                        }
+                        Box {
+                            IconButton(onClick = { moreMenu = true }) {
+                                Icon(Icons.Default.MoreVert, contentDescription = "More")
+                            }
+                            DropdownMenu(expanded = moreMenu, onDismissRequest = { moreMenu = false }) {
+                                DropdownMenuItem(
+                                    text = { Text(if (checkingUpdate) "Checking…" else "Check for updates") },
+                                    leadingIcon = { Icon(Icons.Default.SystemUpdate, contentDescription = null) },
+                                    enabled = !checkingUpdate,
+                                    onClick = { moreMenu = false; checkForUpdates() },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Version ${BuildConfig.VERSION_NAME}") },
+                                    leadingIcon = { Icon(Icons.Default.Info, contentDescription = null) },
+                                    enabled = false,
+                                    onClick = {},
+                                )
                             }
                         }
                     },
@@ -434,6 +485,7 @@ fun HomeScreen(onOpen: (String) -> Unit, onScan: (folderId: String?) -> Unit) {
             scope.launch { ids.forEach { DocumentRepository.delete(it) } }
         }
     }
+    update?.let { info -> UpdateDialog(info) { update = null } }
     busyText?.let { BusyDialog(it) }
 }
 
