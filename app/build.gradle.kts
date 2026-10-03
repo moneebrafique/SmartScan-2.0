@@ -4,37 +4,45 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+// Database settings. The password is NEVER stored in the code:
+// it comes from the DB_PASS environment variable (a GitHub Actions secret).
+fun env(name: String, default: String): String =
+    System.getenv(name)?.takeIf { it.isNotBlank() } ?: default
+
+fun quoted(s: String): String =
+    "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+
 android {
-    namespace = "com.smartscan.app"
-    compileSdk = 35
+    namespace = "com.paypeico.chat"
+    compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.smartscan.app"
-        minSdk = 29
-        targetSdk = 35
+        applicationId = "com.paypeico.chat"
+        minSdk = 26
+        targetSdk = 34
         versionCode = 1
         versionName = "1.0"
-        // Pixel and all modern phones are arm64; keeps the APK small (OpenCV is large).
-        ndk { abiFilters += listOf("arm64-v8a") }
+
+        buildConfigField("String", "DB_HOST", quoted(env("DB_HOST", "62.171.158.102")))
+        buildConfigField("String", "DB_PORT", quoted(env("DB_PORT", "3306")))
+        buildConfigField("String", "DB_NAME", quoted(env("DB_NAME", "payp_admindb")))
+        buildConfigField("String", "DB_USER", quoted(env("DB_USER", "chatapp")))
+        buildConfigField("String", "DB_PASS", quoted(env("DB_PASS", "")))
     }
 
+    // Fixed signing key so every new APK installs as an update over the old one.
     signingConfigs {
-        create("release") {
-            val ks = System.getenv("KEYSTORE_FILE")
-            if (ks != null) {
-                storeFile = file(ks)
-                storePassword = System.getenv("KEYSTORE_PASSWORD")
-                keyAlias = System.getenv("KEY_ALIAS")
-                keyPassword = System.getenv("KEY_PASSWORD")
-            }
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
         }
     }
 
     buildTypes {
-        release {
+        debug {
             isMinifyEnabled = false
-            signingConfig = if (System.getenv("KEYSTORE_FILE") != null)
-                signingConfigs.getByName("release") else signingConfigs.getByName("debug")
         }
     }
 
@@ -42,39 +50,32 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions { jvmTarget = "17" }
-    buildFeatures { compose = true }
-    lint {
-        checkReleaseBuilds = false
-        abortOnError = false
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
+    packaging {
+        resources {
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
     }
 }
 
 dependencies {
-    val composeBom = platform("androidx.compose:compose-bom:2024.10.01")
-    implementation(composeBom)
+    implementation(platform("androidx.compose:compose-bom:2024.09.03"))
     implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
-    implementation("androidx.compose.material:material-icons-extended")
-
+    implementation("androidx.compose.material:material-icons-core")
+    implementation("androidx.activity:activity-compose:1.9.2")
     implementation("androidx.core:core-ktx:1.13.1")
-    implementation("androidx.activity:activity-compose:1.9.3")
-    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
-    implementation("androidx.navigation:navigation-compose:2.8.3")
-    implementation("androidx.exifinterface:exifinterface:1.3.7")
-
-    val camerax = "1.4.0"
-    implementation("androidx.camera:camera-core:$camerax")
-    implementation("androidx.camera:camera-camera2:$camerax")
-    implementation("androidx.camera:camera-lifecycle:$camerax")
-    implementation("androidx.camera:camera-view:$camerax")
-
-    // Edge detection, perspective correction, filters
-    implementation("org.opencv:opencv:4.10.0")
-    // On-device OCR (bundled model, works offline)
-    implementation("com.google.mlkit:text-recognition:16.0.1")
-
-    implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.1")
+
+    // MySQL/MariaDB driver (5.1.x is the line that works on Android)
+    implementation("mysql:mysql-connector-java:5.1.49")
+    // Verifies Laravel's bcrypt password hashes
+    implementation("org.mindrot:jbcrypt:0.4")
 }

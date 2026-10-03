@@ -1,5 +1,4 @@
 <resources>
-    <style name="Theme.SmartScan" parent="android:Theme.Material.Light.NoActionBar">
-        <item name="android:windowBackground">@android:color/white</item>
-    </style>
+    <style name="Theme.PaypeicoChat" parent="android:Theme.Material.Light.NoActionBar" />
+    <color name="ic_bg">#5B4CF0</color>
 </resources>
